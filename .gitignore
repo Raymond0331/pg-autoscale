@@ -1,0 +1,27 @@
+# Terraform
+.terraform
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+
+# Variables (contains sensitive data)
+terraform.tfvars
+secret_data.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup
+*.backup
+*.bak

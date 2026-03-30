@@ -1,0 +1,17 @@
+# GCP Project Configuration
+project_id = "your-gcp-project-id"
+
+# Region
+region = "asia-northeast1"
+
+# Availability Zones
+zones = ["asia-northeast1-a", "asia-northeast1-b", "asia-northeast1-c"]
+
+# PostgreSQL Configuration
+pg_password  = "your-secure-password"
+node_count   = 3
+machine_type = "e2-standard-2"
+
+# External Access
+# Restrict to your IP range for security
+allowed_external_ips = ["0.0.0.0/0"]
