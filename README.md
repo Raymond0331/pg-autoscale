@@ -1,84 +1,52 @@
-# Patroni PostgreSQL HA Cluster - Auto-Scaling Solution
+# pg-autoscale
 
-## Project Overview
+**Zero-Downtime Auto-Scaling for Patroni PostgreSQL Clusters on GCP**
 
-This project provides a zero-downtime auto-scaling solution for PostgreSQL High Availability clusters on Google Cloud Platform, powered by **Patroni** and **Raft consensus**.
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-### Key Features
+Patroni PostgreSQL HA cluster with automatic scaling on Google Cloud Platform. Built on Raft consensus for true high availability without external dependencies.
 
-- **Zero-Downtime Scaling**: Add or remove nodes without service interruption
-- **No Failover on Scale-Out**: Existing nodes keep their roles when adding nodes
-- **Raft-Based Consensus**: No external DCS (Distributed Configuration Store) required
-- **Private Networking**: All nodes use internal IPs only; outbound via Cloud NAT
-- **Load Balancer Integration**: External IP points to current leader for write operations
+## Features
 
----
+- **Zero-Downtime Scaling** - Add or remove nodes without service interruption
+- **No Failover on Scale-Out** - Existing nodes keep their roles when adding nodes
+- **Raft-Based** - No external DCS (etcd, Consul) required
+- **Private Network** - All nodes use internal IPs; outbound via Cloud NAT
+- **Load Balancer Integration** - External IP always points to current leader
 
 ## Architecture
 
 ```
-                         ┌─────────────────────────────────────┐
-                         │         GCP External LB             │
-                         │   (pg-external-forwarding-rule)     │
-                         │         Port 5432 → Leader          │
-                         └──────────────┬──────────────────────┘
-                                        │ 34.x.x.x (Static External IP)
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          pg-ha-vpc (Custom VPC)                          │
-│  ┌──────────────┐                                                       │
-│  │  Cloud NAT   │◄──── Egress (updates, apt, pip)                       │
-│  └──────┬───────┘                                                       │
-│         │                                                                │
-│  ┌──────┴───────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │  pg-subnet-1 │  │  pg-subnet-2 │  │  pg-subnet-3 │                  │
-│  │ 192.168.1.0/24│  │ 192.168.2.0/24│  │ 192.168.3.0/24│                  │
-│  │              │  │              │  │              │                  │
-│  │ pg-node-1    │  │ pg-node-2    │  │ pg-node-3    │                  │
-│  │ (LEADER)     │  │ (REPLICA)    │  │ (REPLICA)    │                  │
-│  │ 192.168.1.10 │  │ 192.168.2.10 │  │ 192.168.3.10 │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-│         │                                                       Cloud Router
-└─────────┼───────────────────────────────────────────────────────────────┘
-          │
-          │ More subnets: pg-subnet-4 (192.168.4.0/24), pg-subnet-5 (192.168.5.0/24)
-          │ More nodes: pg-node-4, pg-node-5, ... up to pg-node-10
-          │
+                    ┌─────────────────────────────────┐
+                    │      GCP External Load Balancer │
+                    │      Port 5432 → Leader         │
+                    └──────────────┬──────────────────┘
+                                   │ 34.x.x.x (Static IP)
+                                   ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                         pg-ha-vpc (VPC)                             │
+│  ┌──────────┐                                                       │
+│  │Cloud NAT │◄──── Egress (updates, apt, pip)                      │
+│  └────┬─────┘                                                       │
+│       │                                                              │
+│  ┌────┴────┐  ┌──────────┐  ┌──────────┐                           │
+│  │ pg-sub-1│  │ pg-sub-2│  │ pg-sub-3│                           │
+│  │192.168.1│  │192.168.2│  │192.168.3│                           │
+│  │ pg-node-1│  │ pg-node-2│  │ pg-node-3│                           │
+│  │ (LEADER) │  │ (REPLICA)│  │ (REPLICA)│                           │
+│  └──────────┘  └──────────┘  └──────────┘                           │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-### Components
+## Prerequisites
 
-| Component | Description |
-|-----------|-------------|
-| **Patroni** | PostgreSQL HA solution with Raft consensus |
-| **Raft** | Distributed consensus protocol for leader election |
-| **Cloud NAT** | Provides outbound internet for private nodes |
-| **External LB** | Routes PostgreSQL traffic to current leader |
-| **Target Pool** | Health-checked group of VM instances |
+- GCP Project with billing enabled
+- `gcloud` CLI authenticated (`gcloud auth login`)
+- Terraform >= 1.0 installed
 
-### Network Ports
+## Quick Start
 
-| Port | Service | Access |
-|------|---------|--------|
-| 5432 | PostgreSQL | Internal network + External LB |
-| 8008 | Patroni REST API | Internal network (health checks) |
-| 2222 | Raft | Internal network only |
-| 22 | SSH | IAP tunnel only |
-
----
-
-## Deployment
-
-### Prerequisites
-
-1. **GCP Project** with billing enabled
-2. **gcloud CLI** authenticated (`gcloud auth login`)
-3. **Terraform** >= 1.0 installed
-4. **SSH key pair** for VM access (optional)
-
-### Configuration
-
-1. Copy and configure Terraform variables:
+### 1. Configure
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
@@ -87,149 +55,151 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-project_id         = "your-gcp-project-id"
-region             = "asia-northeast1"
-pg_password        = "your-secure-password"
-node_count         = 3
-machine_type       = "e2-standard-2"
+project_id    = "your-gcp-project-id"
+region        = "asia-northeast1"
+pg_password   = "your-secure-password"
+node_count    = 3
+machine_type  = "e2-standard-2"
 ```
 
-2. Configure the scaling script:
-
-Edit `scripts/patroni-scale.sh`:
+### 2. Deploy
 
 ```bash
-PROJECT_ID="your-gcp-project-id"
-PG_PASSWORD="your-secure-password"
-```
-
-### Deployment Steps
-
-```bash
-# Initialize Terraform
 terraform init
-
-# Plan deployment
-terraform plan -out=tfplan
-
-# Apply deployment
 terraform apply -auto-approve
-
-# Verify cluster
-./scripts/patroni-scale.sh status
 ```
 
----
-
-## Operations
-
-### Scaling Out (Add Nodes)
+### 3. Connect
 
 ```bash
-# Add single node
+# Get external IP
+terraform output external_ip
+
+# Connect to PostgreSQL
+psql -h <EXTERNAL_IP> -U postgres -d postgres
+```
+
+### 4. Scale Out
+
+```bash
+./scripts/patroni-scale.sh add 2
+```
+
+## Usage Examples
+
+### Scale Out (Add Nodes)
+
+```bash
+# Add 1 node
 ./scripts/patroni-scale.sh add 1
 
-# Add multiple nodes
+# Add 3 nodes at once
 ./scripts/patroni-scale.sh add 3
 
-# Check status
+# Check cluster status
 ./scripts/patroni-scale.sh status
 ./scripts/patroni-scale.sh check
 ```
 
-New nodes join as **replicas** via Raft. Existing nodes keep their roles.
-
-### Scaling In (Remove Nodes)
+### Scale In (Remove Nodes)
 
 ```bash
 # Remove a replica node
 ./scripts/patroni-scale.sh remove 5
 
-# Check status
+# View current status
 ./scripts/patroni-scale.sh status
 ```
 
-**Restrictions**:
-- Cannot remove the leader node
-- Cannot reduce below minimum nodes (3)
-- Concurrent removals are blocked by a lock
-
-### Health Check
+### Connect to PostgreSQL
 
 ```bash
-./scripts/patroni-scale.sh check
+# Via load balancer (writes go to leader)
+psql -h $(terraform output -raw external_ip) -U postgres -d postgres
+
+# Via internal IP on a replica (for reads)
+psql -h 192.168.1.10 -U postgres -d postgres
 ```
 
----
+### Manual Failover
+
+```bash
+# SSH to a replica node
+gcloud compute ssh pg-node-2 --zone=asia-northeast1-b --project=YOUR_PROJECT
+
+# Switchover leadership
+sudo patronictl -c /etc/patroni/patroni.yml switchover
+```
+
+## Scaling Behavior
+
+| Operation | Behavior |
+|-----------|----------|
+| **Scale Out** | New nodes join as replicas via Raft. Existing nodes keep roles. Zero downtime. |
+| **Scale In** | Removes replica nodes. Raft automatically reconfigures. Leader cannot be removed directly. |
+| **Min Nodes** | 3 (required for Raft quorum) |
+| **Max Nodes** | 10 (subnet capacity) |
 
 ## File Structure
 
 ```
-pg_autoscale/
+pg-autoscale/
 ├── main.tf              # VPC, Subnets, NAT, Firewall, Secret Manager
-├── compute.tf           # VM instances, Load Balancer, Target Pool
-├── variables.tf         # Input variables
-├── outputs.tf           # Terraform outputs
-├── terraform.tfvars     # Configuration (gitignored)
+├── compute.tf          # VM instances, Load Balancer, Target Pool
+├── variables.tf        # Input variables
+├── outputs.tf          # Terraform outputs
+├── terraform.tfvars.example
 ├── scripts/
 │   ├── patroni-scale.sh     # Auto-scaling script
-│   ├── startup.tpl          # Terraform initial deployment startup
-│   └── startup-scaling.tpl  # Scaling (add node) startup template
+│   ├── startup.tpl           # Initial deployment startup
+│   └── startup-scaling.tpl   # Scaling (add node) startup template
 └── docs/
-    ├── README.md            # This file
-    ├── [README_CN.md](./docs/README_CN.md)         # 中文文档 (Chinese documentation)
-    └── OPERATIONS.md        # Detailed operations guide
+    ├── README.md             # This file
+    ├── README_CN.md          # 中文文档
+    └── OPERATIONS.md         # Detailed operations guide
 ```
-
----
 
 ## Security
 
-- **No Public IPs**: All VM instances use `--no-address` flag
-- **Cloud NAT**: Outbound-only internet access for private instances
-- **Firewall**: Only allows internal network (192.168.0.0/16) and LB health checks
-- **IAP**: SSH access only through Identity-Aware Proxy
-- **Secrets**: PostgreSQL password stored in GCP Secret Manager
-
----
+- **No Public IPs** on VM instances (`--no-address`)
+- **Cloud NAT** for outbound-only internet
+- **Firewall** allows only internal network (192.168.0.0/16) and LB health checks
+- **IAP** for SSH access (no direct SSH)
+- **Secrets** stored in GCP Secret Manager
 
 ## Troubleshooting
 
 ### Node won't join cluster
 
-1. Check if the node is running:
-   ```bash
-   gcloud compute instances list --filter="name~pg-node"
-   ```
+```bash
+# Check if node is running
+gcloud compute instances list --filter="name~pg-node"
 
-2. Check serial port output:
-   ```bash
-   gcloud compute instances get-serial-port-output pg-node-X --zone=ZONE
-   ```
-
-3. Verify network connectivity between nodes
+# Check serial port output
+gcloud compute instances get-serial-port-output pg-node-1 --zone=asia-northeast1-a
+```
 
 ### Leader election issues
 
-1. Check Raft connectivity:
-   ```bash
-   # SSH to node and check
-   patronictl -c /etc/patroni/patroni.yml list
-   ```
+```bash
+# SSH to any node and check Raft status
+patronictl -c /etc/patroni/patroni.yml list
+```
 
-2. Ensure at least majority of nodes are healthy
+### Lock file issues
 
-### Scale-out fails
+```bash
+# If script fails with "Cannot acquire lock"
+rm -rf /tmp/patroni-scale.lock
+```
 
-1. Check if VPC network exists:
-   ```bash
-   gcloud compute networks describe pg-ha-vpc
-   ```
+## Cleanup
 
-2. Verify subnet capacity (max 10 nodes with current config)
-
----
+```bash
+# Destroy all resources
+terraform destroy -auto-approve
+```
 
 ## License
 
-MIT License
+MIT
